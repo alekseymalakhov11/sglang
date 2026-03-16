@@ -48,10 +48,10 @@ from sglang.srt.speculative.multi_layer_eagle_draft_extend_cuda_graph_runner imp
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.speculative.spec_utils import (
     draft_tp_context,
-    fast_topk,
     generate_token_bitmask,
     load_token_map,
     maybe_detect_nan,
+    select_draft_topk_or_topp,
     select_top_k_tokens,
 )
 from sglang.srt.utils import empty_context, get_available_gpu_memory, is_cuda, is_npu
@@ -84,6 +84,8 @@ class MultiLayerEagleWorker(TpModelWorker):
         # Parse arguments
         self.server_args = server_args
         self.topk = server_args.speculative_eagle_topk
+        self.topp = server_args.speculative_eagle_topp
+        self.draft_sampling = server_args.speculative_eagle_draft_sampling
         self.speculative_num_steps = server_args.speculative_num_steps
         self.speculative_num_draft_tokens = server_args.speculative_num_draft_tokens
         self.gpu_id = gpu_id
@@ -629,7 +631,9 @@ class MultiLayerEagleWorker(TpModelWorker):
                 f"draft_extend_for_prefill step {step}",
             )
             probs = torch.softmax(logits_output.next_token_logits, dim=-1)
-            topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+            topk_p, topk_index = select_draft_topk_or_topp(
+                probs, self.topk, self.draft_sampling, self.topp
+            )
             topk_p_list.append(topk_p)
             topk_index_list.append(topk_index)
             pt = 0
@@ -726,7 +730,9 @@ class MultiLayerEagleWorker(TpModelWorker):
                 f"draft_extend_after_decode step {step} (cuda_graph={can_cuda_graph})",
             )
             probs = torch.softmax(logits_output.next_token_logits, dim=-1)
-            topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+            topk_p, topk_index = select_draft_topk_or_topp(
+                probs, self.topk, self.draft_sampling, self.topp
+            )
             topk_p_list.append(topk_p)
             topk_index_list.append(topk_index)
             pt = 0

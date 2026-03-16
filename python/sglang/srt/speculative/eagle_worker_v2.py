@@ -51,12 +51,12 @@ from sglang.srt.speculative.spec_utils import (
     load_token_map,
     maybe_detect_nan,
     maybe_detect_oob,
+    select_draft_topk_or_topp,
     select_top_k_tokens,
 )
 from sglang.srt.utils.common import (
     MultiprocessingSerializer,
     empty_context,
-    fast_topk,
     get_available_gpu_memory,
     is_cuda,
     is_hip,
@@ -110,6 +110,8 @@ class EagleDraftWorker(BaseDraftWorker):
         # Args for easy access
         self.device = server_args.device
         self.topk = server_args.speculative_eagle_topk
+        self.topp = server_args.speculative_eagle_topp
+        self.draft_sampling = server_args.speculative_eagle_draft_sampling
         self.speculative_num_steps = server_args.speculative_num_steps
         self.speculative_num_draft_tokens = server_args.speculative_num_draft_tokens
         self.speculative_algorithm = SpeculativeAlgorithm.from_string(
@@ -450,7 +452,9 @@ class EagleDraftWorker(BaseDraftWorker):
             ).logits_output
             maybe_detect_nan(logits_output.next_token_logits, f"draft_forward step {i}")
             probs = torch.softmax(logits_output.next_token_logits, dim=-1)
-            topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+            topk_p, topk_index = select_draft_topk_or_topp(
+                probs, self.topk, self.draft_sampling, self.topp
+            )
             maybe_detect_oob(
                 topk_index,
                 0,
@@ -538,8 +542,8 @@ class EagleDraftWorker(BaseDraftWorker):
 
         # Update spec_info for the next draft step
         probs = torch.softmax(logits_output.next_token_logits, dim=-1)
-        next_draft_input.topk_p, next_draft_input.topk_index = fast_topk(
-            probs, self.topk, dim=-1
+        next_draft_input.topk_p, next_draft_input.topk_index = select_draft_topk_or_topp(
+            probs, self.topk, self.draft_sampling, self.topp
         )
         next_draft_input.hidden_states = logits_output.hidden_states
         return next_draft_input
@@ -605,7 +609,9 @@ class EagleDraftWorker(BaseDraftWorker):
             select_index
         ]
         probs = torch.softmax(draft_logits_output.next_token_logits, dim=-1)
-        ret_topk_p, ret_topk_index = fast_topk(probs, self.topk, dim=-1)
+        ret_topk_p, ret_topk_index = select_draft_topk_or_topp(
+            probs, self.topk, self.draft_sampling, self.topp
+        )
         ret_hidden_states = draft_logits_output.hidden_states
 
         # Construct the return values
@@ -637,6 +643,8 @@ class EAGLEWorkerV2(BaseSpecWorker):
         # Parse arguments
         self.server_args = server_args
         self.topk = server_args.speculative_eagle_topk
+        self.topp = server_args.speculative_eagle_topp
+        self.draft_sampling = server_args.speculative_eagle_draft_sampling
         self.speculative_num_steps = server_args.speculative_num_steps
         self.speculative_num_draft_tokens = server_args.speculative_num_draft_tokens
         self.tp_rank = tp_rank

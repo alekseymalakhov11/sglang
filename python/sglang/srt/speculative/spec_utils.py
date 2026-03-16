@@ -513,6 +513,41 @@ def select_top_k_tokens(
     return input_ids, hidden_states, scores, tree_info
 
 
+@torch.compile(dynamic=True, disable=_is_npu)
+def select_draft_topk(
+    probs: torch.Tensor,
+    topk: int,
+):
+    return fast_topk(probs, topk, dim=-1)
+
+
+@torch.compile(dynamic=True, disable=_is_npu)
+def select_draft_topp(
+    probs: torch.Tensor,
+    topk: int,
+    topp: float,
+):
+    sorted_p, sorted_idx = torch.sort(probs, dim=-1, descending=True)
+    cumulative = torch.cumsum(sorted_p, dim=-1)
+    # Keep token i if prefix mass before i is <= topp.
+    keep_mask = cumulative - sorted_p <= topp + 1e-7
+    keep_mask[..., 0] = True
+    sorted_p = sorted_p * keep_mask
+    return sorted_p[..., :topk], sorted_idx[..., :topk]
+
+
+def select_draft_topk_or_topp(
+    probs: torch.Tensor,
+    topk: int,
+    draft_sampling: str,
+    topp: float,
+):
+    """Dispatch draft candidate selection without control flow inside compiled graphs."""
+    if draft_sampling == "topk":
+        return select_draft_topk(probs, topk)
+    return select_draft_topp(probs, topk, topp)
+
+
 def generate_simulated_accept_index(
     accept_index,
     predict,

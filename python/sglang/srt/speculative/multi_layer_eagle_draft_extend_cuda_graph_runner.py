@@ -43,7 +43,7 @@ from sglang.srt.model_executor.forward_batch_info import (
 from sglang.srt.model_executor.input_buffers import ForwardInputBuffers
 from sglang.srt.speculative.eagle_info import EagleDraftInput
 from sglang.srt.speculative.multi_layer_eagle_utils import assign_new_state_triton
-from sglang.srt.speculative.spec_utils import fast_topk
+from sglang.srt.speculative.spec_utils import select_draft_topk_or_topp
 from sglang.srt.utils import (
     get_available_gpu_memory,
     require_attn_tp_gather,
@@ -107,6 +107,8 @@ class MultiLayerEagleDraftExtendCudaGraphRunner:
             model_runner.server_args.speculative_num_draft_tokens
         )
         self.topk = model_runner.server_args.speculative_eagle_topk
+        self.topp = model_runner.server_args.speculative_eagle_topp
+        self.draft_sampling = model_runner.server_args.speculative_eagle_draft_sampling
         self.enable_profile_cuda_graph = (
             model_runner.server_args.enable_profile_cuda_graph
         )
@@ -448,7 +450,9 @@ class MultiLayerEagleDraftExtendCudaGraphRunner:
             )
 
             probs = torch.softmax(ret.next_token_logits[select_index], dim=-1)
-            ret.topk_p, ret.topk_index = fast_topk(probs, self.topk, dim=-1)
+            ret.topk_p, ret.topk_index = select_draft_topk_or_topp(
+                probs, self.topk, self.draft_sampling, self.topp
+            )
 
             if self.next_cuda_graph_runner is not None:
                 next_buffers = self.next_cuda_graph_runner.buffers

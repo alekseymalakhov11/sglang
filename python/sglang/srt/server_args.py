@@ -485,6 +485,8 @@ class ServerArgs:
     speculative_draft_load_format: Optional[str] = None
     speculative_num_steps: Optional[int] = None
     speculative_eagle_topk: Optional[int] = None
+    speculative_eagle_topp: float = 1.0
+    speculative_eagle_draft_sampling: str = "topk"
     speculative_num_draft_tokens: Optional[int] = None
     speculative_accept_threshold_single: float = 1.0
     speculative_accept_threshold_acc: float = 1.0
@@ -2839,6 +2841,15 @@ class ServerArgs:
                         "trtllm_mha backend only supports topk = 1 for speculative decoding."
                     )
 
+            if self.speculative_eagle_draft_sampling not in ["topk", "topp"]:
+                raise ValueError(
+                    f"speculative_eagle_draft_sampling must be one of [topk, topp], got {self.speculative_eagle_draft_sampling}."
+                )
+            if self.speculative_eagle_draft_sampling == "topp" and not (0.0 < self.speculative_eagle_topp <= 1.0):
+                raise ValueError(
+                    f"speculative_eagle_topp must be in (0, 1] when draft sampling is topp, got {self.speculative_eagle_topp}."
+                )
+
             if (
                 self.speculative_eagle_topk == 1
                 and self.speculative_num_draft_tokens != self.speculative_num_steps + 1
@@ -4458,6 +4469,19 @@ class ServerArgs:
             type=int,
             help="The number of tokens sampled from the draft model in eagle2 each step.",
             default=ServerArgs.speculative_eagle_topk,
+        )
+        parser.add_argument(
+            "--speculative-eagle-topp",
+            type=float,
+            help="Top-p threshold for speculative draft tree generation when --speculative-eagle-draft-sampling=topp.",
+            default=ServerArgs.speculative_eagle_topp,
+        )
+        parser.add_argument(
+            "--speculative-eagle-draft-sampling",
+            type=str,
+            choices=["topk", "topp"],
+            help="Draft tree candidate selection strategy for EAGLE: topk or topp.",
+            default=ServerArgs.speculative_eagle_draft_sampling,
         )
         parser.add_argument(
             "--speculative-num-draft-tokens",
