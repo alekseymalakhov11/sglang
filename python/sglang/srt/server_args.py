@@ -2820,16 +2820,22 @@ class ServerArgs:
                             "DeepSeek MTP does not require setting speculative_draft_model_path."
                         )
 
-            if self.speculative_num_steps is None:
-                assert (
-                    self.speculative_eagle_topk is None
-                    and self.speculative_num_draft_tokens is None
-                )
+            if (
+                self.speculative_num_steps is None
+                or self.speculative_eagle_topk is None
+                or self.speculative_num_draft_tokens is None
+            ):
                 (
-                    self.speculative_num_steps,
-                    self.speculative_eagle_topk,
-                    self.speculative_num_draft_tokens,
+                    auto_spec_steps,
+                    auto_spec_topk,
+                    auto_spec_num_draft_tokens,
                 ) = auto_choose_speculative_params(self)
+                if self.speculative_num_steps is None:
+                    self.speculative_num_steps = auto_spec_steps
+                if self.speculative_eagle_topk is None:
+                    self.speculative_eagle_topk = auto_spec_topk
+                if self.speculative_num_draft_tokens is None:
+                    self.speculative_num_draft_tokens = auto_spec_num_draft_tokens
 
             if (
                 self.attention_backend == "trtllm_mha"
