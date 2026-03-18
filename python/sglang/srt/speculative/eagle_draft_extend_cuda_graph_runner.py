@@ -26,7 +26,7 @@ from sglang.srt.model_executor.forward_batch_info import (
 )
 from sglang.srt.model_executor.input_buffers import ForwardInputBuffers
 from sglang.srt.speculative.eagle_info import EagleDraftInput
-from sglang.srt.speculative.spec_utils import fast_topk
+from sglang.srt.speculative.spec_utils import select_draft_topk_or_topp
 from sglang.srt.utils import (
     require_attn_tp_gather,
     require_gathered_buffer,
@@ -79,6 +79,8 @@ class EAGLEDraftExtendCudaGraphRunner:
         self.dp_size = self.model_runner.dp_size
         self.speculative_num_steps = model_runner.server_args.speculative_num_steps
         self.topk = model_runner.server_args.speculative_eagle_topk
+        self.topp = model_runner.server_args.speculative_eagle_topp
+        self.draft_sampling = model_runner.server_args.speculative_eagle_draft_sampling
         self.enable_profile_cuda_graph = (
             model_runner.server_args.enable_profile_cuda_graph
         )
@@ -397,7 +399,9 @@ class EAGLEDraftExtendCudaGraphRunner:
                 forward_batch,
             )
             probs = torch.softmax(ret.next_token_logits, dim=-1)
-            ret.topk_p, ret.topk_index = fast_topk(probs, self.topk, dim=-1)
+            ret.topk_p, ret.topk_index = select_draft_topk_or_topp(
+                probs, self.topk, self.draft_sampling, self.topp
+            )
 
             forward_batch.out_cache_loc = output_cache_loc_backup
             forward_batch.spec_info.hidden_states = hidden_states_backup

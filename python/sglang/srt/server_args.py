@@ -485,6 +485,8 @@ class ServerArgs:
     speculative_draft_load_format: Optional[str] = None
     speculative_num_steps: Optional[int] = None
     speculative_eagle_topk: Optional[int] = None
+    speculative_eagle_topp: float = 1.0
+    speculative_eagle_draft_sampling: str = "topk"
     speculative_num_draft_tokens: Optional[int] = None
     speculative_accept_threshold_single: float = 1.0
     speculative_accept_threshold_acc: float = 1.0
@@ -2818,16 +2820,22 @@ class ServerArgs:
                             "DeepSeek MTP does not require setting speculative_draft_model_path."
                         )
 
-            if self.speculative_num_steps is None:
-                assert (
-                    self.speculative_eagle_topk is None
-                    and self.speculative_num_draft_tokens is None
-                )
+            if (
+                self.speculative_num_steps is None
+                or self.speculative_eagle_topk is None
+                or self.speculative_num_draft_tokens is None
+            ):
                 (
-                    self.speculative_num_steps,
-                    self.speculative_eagle_topk,
-                    self.speculative_num_draft_tokens,
+                    auto_spec_steps,
+                    auto_spec_topk,
+                    auto_spec_num_draft_tokens,
                 ) = auto_choose_speculative_params(self)
+                if self.speculative_num_steps is None:
+                    self.speculative_num_steps = auto_spec_steps
+                if self.speculative_eagle_topk is None:
+                    self.speculative_eagle_topk = auto_spec_topk
+                if self.speculative_num_draft_tokens is None:
+                    self.speculative_num_draft_tokens = auto_spec_num_draft_tokens
 
             if (
                 self.attention_backend == "trtllm_mha"
@@ -2838,6 +2846,15 @@ class ServerArgs:
                     raise ValueError(
                         "trtllm_mha backend only supports topk = 1 for speculative decoding."
                     )
+
+            if self.speculative_eagle_draft_sampling not in ["topk", "topp"]:
+                raise ValueError(
+                    f"speculative_eagle_draft_sampling must be one of [topk, topp], got {self.speculative_eagle_draft_sampling}."
+                )
+            if self.speculative_eagle_draft_sampling == "topp" and not (0.0 < self.speculative_eagle_topp <= 1.0):
+                raise ValueError(
+                    f"speculative_eagle_topp must be in (0, 1] when draft sampling is topp, got {self.speculative_eagle_topp}."
+                )
 
             if (
                 self.speculative_eagle_topk == 1
@@ -4458,6 +4475,19 @@ class ServerArgs:
             type=int,
             help="The number of tokens sampled from the draft model in eagle2 each step.",
             default=ServerArgs.speculative_eagle_topk,
+        )
+        parser.add_argument(
+            "--speculative-eagle-topp",
+            type=float,
+            help="Top-p threshold for speculative draft tree generation when --speculative-eagle-draft-sampling=topp.",
+            default=ServerArgs.speculative_eagle_topp,
+        )
+        parser.add_argument(
+            "--speculative-eagle-draft-sampling",
+            type=str,
+            choices=["topk", "topp"],
+            help="Draft tree candidate selection strategy for EAGLE: topk or topp.",
+            default=ServerArgs.speculative_eagle_draft_sampling,
         )
         parser.add_argument(
             "--speculative-num-draft-tokens",

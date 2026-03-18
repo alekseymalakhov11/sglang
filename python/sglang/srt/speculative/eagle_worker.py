@@ -50,12 +50,12 @@ from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.speculative.spec_utils import (
     assign_draft_cache_locs,
     draft_tp_context,
-    fast_topk,
     generate_token_bitmask,
     get_last_loc_large_page_size_large_top_k,
     load_token_map,
     maybe_detect_nan,
     maybe_detect_oob,
+    select_draft_topk_or_topp,
     select_top_k_tokens,
 )
 from sglang.srt.utils import (
@@ -93,6 +93,8 @@ class EAGLEWorker(TpModelWorker):
         # Parse arguments
         self.server_args = server_args
         self.topk = server_args.speculative_eagle_topk
+        self.topp = server_args.speculative_eagle_topp
+        self.draft_sampling = server_args.speculative_eagle_draft_sampling
         self.speculative_num_steps = server_args.speculative_num_steps
         self.speculative_num_draft_tokens = server_args.speculative_num_draft_tokens
         self.gpu_id = gpu_id
@@ -676,7 +678,9 @@ class EAGLEWorker(TpModelWorker):
             ).logits_output
             maybe_detect_nan(logits_output.next_token_logits, f"draft_forward step {i}")
             probs = torch.softmax(logits_output.next_token_logits, dim=-1)
-            topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+            topk_p, topk_index = select_draft_topk_or_topp(
+                probs, self.topk, self.draft_sampling, self.topp
+            )
             maybe_detect_oob(
                 topk_index,
                 0,
@@ -1007,7 +1011,9 @@ class EAGLEWorker(TpModelWorker):
         self, logits_output: LogitsProcessorOutput, draft_input: EagleDraftInput
     ):
         probs = torch.softmax(logits_output.next_token_logits, dim=-1)
-        draft_input.topk_p, draft_input.topk_index = fast_topk(probs, self.topk, dim=-1)
+        draft_input.topk_p, draft_input.topk_index = select_draft_topk_or_topp(
+            probs, self.topk, self.draft_sampling, self.topp
+        )
         draft_input.hidden_states = logits_output.hidden_states
 
     def update_weights_from_tensor(self, recv_req: UpdateWeightsFromTensorReqInput):

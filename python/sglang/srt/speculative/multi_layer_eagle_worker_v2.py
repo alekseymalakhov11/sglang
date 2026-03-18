@@ -41,9 +41,10 @@ from sglang.srt.speculative.spec_utils import (
     draft_tp_context,
     maybe_detect_nan,
     maybe_detect_oob,
+    select_draft_topk_or_topp,
     select_top_k_tokens,
 )
-from sglang.srt.utils.common import empty_context, fast_topk
+from sglang.srt.utils.common import empty_context
 
 if TYPE_CHECKING:
     from sglang.srt.model_executor.model_runner import ModelRunner, ModelRunnerOutput
@@ -90,6 +91,8 @@ class MultiLayerEagleDraftWorker(BaseDraftWorker):
         # Args for easy access
         self.device = server_args.device
         self.topk = server_args.speculative_eagle_topk
+        self.topp = server_args.speculative_eagle_topp
+        self.draft_sampling = server_args.speculative_eagle_draft_sampling
         self.speculative_num_steps = server_args.speculative_num_steps
         self.speculative_num_draft_tokens = server_args.speculative_num_draft_tokens
         self.speculative_algorithm = SpeculativeAlgorithm.from_string(
@@ -402,7 +405,9 @@ class MultiLayerEagleDraftWorker(BaseDraftWorker):
                 f"draft_extend_for_prefill step {step}",
             )
             probs = torch.softmax(output.logits_output.next_token_logits, dim=-1)
-            topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+            topk_p, topk_index = select_draft_topk_or_topp(
+                probs, self.topk, self.draft_sampling, self.topp
+            )
             topk_p_list.append(topk_p)
             topk_index_list.append(topk_index)
             # Chain-style: use this step's output hidden_states as next step's input
@@ -505,7 +510,9 @@ class MultiLayerEagleDraftWorker(BaseDraftWorker):
                     draft_logits_output.logits_output.next_token_logits[select_index],
                     dim=-1,
                 )
-                ret_topk_p, ret_topk_index = fast_topk(probs, self.topk, dim=-1)
+                ret_topk_p, ret_topk_index = select_draft_topk_or_topp(
+                    probs, self.topk, self.draft_sampling, self.topp
+                )
                 if forward_batch.extend_seq_lens is not None:
                     rotate_input_ids_triton(
                         forward_batch.input_ids,
@@ -572,6 +579,8 @@ class MultiLayerEagleWorkerV2(BaseSpecWorker):
         # Parse arguments
         self.server_args = server_args
         self.topk = server_args.speculative_eagle_topk
+        self.topp = server_args.speculative_eagle_topp
+        self.draft_sampling = server_args.speculative_eagle_draft_sampling
         self.speculative_num_steps = server_args.speculative_num_steps
         self.speculative_num_draft_tokens = server_args.speculative_num_draft_tokens
         self.gpu_id = gpu_id
